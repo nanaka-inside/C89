@@ -270,8 +270,36 @@ NSURLSession.sharedSession().rx_response(request)
 
 　次羽からは `HttpClient` と `ApiClient` の実装についてみていきます。
 
-## 第3羽 Call Me from UI Thread.
+## 第3羽 Call Me HttpClient.
 
-## 第4羽 対非同期処理用決戦部隊、通称チマメ隊
+　HTTPリクエストを組み立てる機能単位を HttpClient にまとめることを考えます。
+こうすることによりクエリパラメータのURLエンコード処理やリクエストヘッダーを作る部分の共通処理をまとめることができます。
+また、`HttpClient` としてプロトコル（他言語でいうところのインターフェース）を切っておくことにより、
+実際の通信時に用いるライブラリやSwiftのAPIへの依存を外側に晒さずにすむという効果もあります。
+作るものの全体像は下図のようなものになります。
 
-## 第5羽 君のためなら開発する
+![](images/rxhttpclient.png)
+
+　`RequestParameter` と `RequestHeader` は、単純に Key-Value 的なただのデータ構造です。
+実装的には以下のように typealias としてあげるのが一番簡単ですが、個別に `struct` を定義しても大丈夫です。
+`RxHttpClient` のプロトコル自体もそのまま書き下せば良いかと思います。
+
+```swift
+import RxSwift
+import Foundation
+
+public typealias RequestParameter = (key: String, value: String)
+public typealias RequestHeader = (key: String, value: String)
+
+public protocol RxHttpClient {
+        
+    func get(url: NSURL, parameters: [RequestParameter], headers: [RequestHeader]) -> Observable<(NSData, NSHTTPURLResponse)>
+    func post(url: NSURL, parameters: [RequestParameter], headers: [RequestHeader]) -> Observable<(NSData, NSHTTPURLResponse)>
+    func put(url: NSURL, parameters: [RequestParameter], headers: [RequestHeader]) -> Observable<(NSData, NSHTTPURLResponse)>
+    func delete(url: NSURL, parameters: [RequestParameter], headers: [RequestHeader]) -> Observable<(NSData, NSHTTPURLResponse)>
+    
+}
+```
+
+　実装自体はちゃんと動けばどんな感じにしても良いかと思いますが、Alamofireなどライブラリに依存しない形で実装した一例を、[GitHub: https://github.com/53ningen/RxHttp](https://github.com/53ningen/RxHttp) に公開していますのでそちらをご覧いただければ幸いです。
+
