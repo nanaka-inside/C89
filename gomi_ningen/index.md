@@ -34,7 +34,7 @@ $ pod init
 ```
     pod 'RxSwift', '2.0.0-beta4'
     pod 'RxCocoa', '2.0.0-beta4'
-```	
+``` 
 
 　なお、筆者の動作確認環境は Xcode 7.2 になります。
 
@@ -301,5 +301,47 @@ public protocol RxHttpClient {
 }
 ```
 
-　実装自体はちゃんと動けばどんな感じにしても良いかと思いますが、Alamofireなどライブラリに依存しない形で実装した一例を、[GitHub: https://github.com/53ningen/RxHttp](https://github.com/53ningen/RxHttp) に公開していますのでそちらをご覧いただければ幸いです。
+　ここで定義したプロトコルの実装クラスは、ちゃんと動けばどんな感じにしても良いかと思いますが、Alamofireなどライブラリに依存しない形で実装した一例を、[GitHub: https://github.com/53ningen/RxHttp](https://github.com/53ningen/RxHttp) に公開していますのでそちらをご覧いただければ幸いです。
+
+　通信関連のエラー処理はこのあたりの層でハンドリングしてあげると以後の層の実装がすっきりすると思いますので、以前に紹介している `flatMap` 関数などを使い、よしなにエラー処理を記述すると使い勝手がなかなか良い `HttpClient` になるのではないでしょうか？
+
+
+## 第4羽 APIを探す日常
+
+　続いて、アプリで用いるウェブAPIの操作を抽象化した `ApiClient` について考えてみましょう。
+使うエンドポイントに対して `Controller` で個別にリクエストパラメータやヘッダを指定するのは煩わしいですし、コード自体の見通しも悪くなります。
+今回は例として、 [Qiita API: https://qiita.com/api/v2/docs](https://qiita.com/api/v2/docs) の記事リストを取得するAPI: `GET /api/v2/items` を扱ってみます。
+実装する `ApiClient` の構造は以下の図のような形となります。
+
+![](images/apiclient.png)
+
+　`QiitaApiClient` の持つメソッドを見ると、指定すべきパラメータがはっきりと理解できるかと思います。
+こうしてあげることによって、クライアントコードでAPIのデータを取得する際に迷わずパラメータを指定することができます。
+図中に出てくる登場人物を確認しましょう。
+まず、`HttpClient` は第3羽で作成したものと同じものとなります。
+今回作成したい `ApiClient` は、メソッドの引数をいい感じに加工して `RequestParameter` や `RequestHeader` を生成し、 `HttpClient` に与えることにより、APIへの通信を行うという仕組みになっています。
+`ItemRecord` は Qiita の投稿記事（item）レスポンスのデータ構造を定義したクラスです。
+Qiita APIは、JSON形式でレスポンスを返してくれますが、`Controller` などでJSONをそのまま扱うのは見通しが悪いので、
+こういったクラスを作成して、そのインスタンスにマッピングしてあげるのが良いかと思います。
+プロトコルとデータ構造のコードはだいたい以下のようになります。
+
+```swift
+public protocol QiitaApiClient {
+    
+    func getItems(offset: Int, limit: Int) -> Observable<[ItemRecord]>
+    func getItems(keyword: String, offset: Int, limit: Int) -> Observable<[ItemRecord]>
+    
+}
+
+public struct ItemRecord {
+
+    let id: String
+    let title: String
+    let url: String
+    // 以下同様に...
+    
+}
+```
+
+　ここで定義したプロトコルの実装クラスでは、JSONを `ItemRecord` にマッピングするなど細かい作業が多くなってきます。RxSwiftを用いた ApiClient の作り方とはまた離れた話になってきますので、GitHub: https://github.com/53ningen/rxswift-examples/tree/master/rxswift-examples/Infrastructure に上げてあります。興味がある方は、そちらをご覧ください。
 
