@@ -156,6 +156,120 @@ $ open ./rxswift-examples.xcoworkspace
 
 ## 第2羽 通信をするお話
 
+　第1羽でみてきたように `RxSwift` を利用すると、UIイベントを手軽にハンドリングすることができます。
+アプリ開発で行う定番の処理としてもう一つ押さえておかなければならないのは、通信処理かと思います。
+実はこれも `RxSwift` を用いて良い感じに扱うことができます。
+
+　利用方法も非常に簡単なのでまずはコード例をみてみましょう。`NSURLSession` のインスタンスに `rx_response` というプロパティが生えているので、これを使えば以下のように簡単に通信処理が行えます。
+
+```swift
+import RxSwift
+import UIKit
+
+class SimpleNetworkingSampleViewController: UIViewController {
+
+    private var disposeBag: DisposeBag = DisposeBag()
+    private let backgroundWorkScheduler = ConcurrentDispatchQueueScheduler(globalConcurrentQueuePriority: .High)
+    
+    override func viewWillAppear(animated: Bool) {
+        super.viewWillAppear(animated)
+        let url = NSURL(string: "http://gochiusa.com")!
+        let request = NSURLRequest(URL: url)
+        NSURLSession.sharedSession().rx_response(request)
+            .subscribeOn(backgroundWorkScheduler)
+            .observeOn(MainScheduler.sharedInstance)
+            .subscribeNext { (data, response) -> Void in
+                if let str = String(data: data, encoding: NSUTF8StringEncoding) {
+                    print(str)
+                }
+            }
+            .addDisposableTo(disposeBag)
+    }
+    
+    override func viewWillDisappear(animated: Bool) {
+        super.viewWillDisappear(animated)
+        disposeBag = DisposeBag()
+    }
+
+}
+```
+
+　`subscribeNext` で渡しているクロージャの中身を見れば大体察しがつくかと思いますが、`rx_response` は `(NSData, NSHTTPURLResponse)` を返してくれるものになってます。
+
+
+### RxSwiftを用いた通信エラー処理
+
+　さて、上記の例に加えてエラー処理をしたいケースを考えてみましょう。たとえば、存在しないページにアクセスした場合は、404のステータスコードとページが見つからない旨のレスポンスが返ってくると思います。
+
+```swift
+let url = NSURL(string: "http://gochiusa.com/hogehoge")!
+let request = NSURLRequest(URL: url)
+NSURLSession.sharedSession().rx_response(request)
+    .subscribeOn(backgroundWorkScheduler)
+    .observeOn(MainScheduler.sharedInstance)
+    .subscribeNext { (data, response) -> Void in
+        if let str = String(data: data, encoding: NSUTF8StringEncoding) {
+            print("status code: " + String(response.statusCode))
+            print("response body: " + str)
+        }
+    }
+    .addDisposableTo(disposeBag)
+
+// => ログ出力
+// status code: 404
+// response body: <!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">
+// <html><head>
+// <title>404 Not Found</title>
+// </head><body>
+// <h1>Not Found</h1>
+// <p>The requested URL /hoge was not found on this server.</p>
+// </body></html>
+```
+
+　Rxにはエラー的な状況をハンドリングする仕組みがあります。例えば、ステータスコードが 200 のときには、レスポンスを `String` で、それ以外のときには `NSError` を流すには次のように書けば OK です。
+
+```swift
+NSURLSession.sharedSession().rx_response(request)
+    .flatMap({ (data, response) -> Observable<String> in
+        if let string = String(data: data, encoding: NSUTF8StringEncoding) where response.statusCode == 200 {
+            // 成功値を流すには flatMap の中で just(値) を返せばよい
+            return just(string) 
+        } else {
+            // エラーを流すには flatMap の中で failWith(NSError) を返せばよい
+            return failWith(NSError(domain: "ConnectionError", code: response.statusCode, userInfo: nil))
+        }
+    })
+    .subscribeOn(backgroundWorkScheduler)
+    .observeOn(MainScheduler.sharedInstance)
+    .subscribe({ (event) -> Void in
+        switch event {
+        case .Next(let string): print(string)  // 値の処理
+        case .Error(let e): self.showDialog(e) // エラー処理
+        case .Completed: break
+        }
+    })
+    .addDisposableTo(disposeBag)
+```
+
+　コードからわかるように、flatMapの中で `just(値)` を返すと成功値を流すことができます。
+また `failWith(ErrorType)` を返すとエラーを伝播させることができます。
+
+### 通信処理の階層化
+
+　簡単なアプリであれば、上記の `NSURLSession.rx_response` を `ViewController` から直接呼び出してしまっても良いのですが、ちょっと複雑な画面やロジックが入るようなアプリを作る際にこれをやってしまうと、たちまちどこに何が書いてあるのかが分からなくなります。
+
+　そこで、通信処理とそのレスポンスの加工を、以下の3つの要素に分離して実装を行うパターンが個人的には気に入っています。
+
+1. HTTPリクエストを組みたて通信を行う責務を持つ `HttpClient`
+2. 利用するウェブAPIに与えるパラメータとそのレスポンスを抽象化した `ApiClient`
+3. ウェブAPIからのレスポンスやキャッシュなどからデータを取得し、クライアント側からコレクションのように操作を加えられるようにした `Repository`
+
+![](images/app.png)
+
+　こうすることにより、例えばリクエストの組み立てなどの部分で、同じロジックを繰り返し書くことを防げます。またスタブを利用したテストを書けば、各処理部単位で正しい実装が行われていることを保証することもできます。また、アプリ開発においてはデザイン確認用のレスポンスを返すスタブを作ると便利かもしれません。
+
+　次羽からは `HttpClient` と `ApiClient` の実装についてみていきます。
+
 ## 第3羽 Call Me from UI Thread.
 
 ## 第4羽 対非同期処理用決戦部隊、通称チマメ隊
